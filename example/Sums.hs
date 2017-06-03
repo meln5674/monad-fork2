@@ -1,9 +1,28 @@
+--------------------------------------------------------------------------------
+-- |
+-- 
+-- An example use of `Control.Monad.Fork`
+--
+-- This program performs a simple task, summing up integers, within a relatively
+-- complex monad transformer stack, using except for handling errors, writer for
+-- maintaining the total, and reader to access the integers to sum, along with
+-- the number that exist
+-- 
+-- This stack is then wrapped in a newtype, `ExampleT`, which is given instances
+-- for the standard mtl classes, as well as `MonadFork`.
+--
+-- Each worker is provided with a offset and count in the list, and the forking
+-- handlers report back to the main thread using an MVar.
+--
+-- After the worker threads are created, the main thread waits on each MVar,
+-- then either throws or tells based on the result
+--------------------------------------------------------------------------------
+
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE PartialTypeSignatures #-}
 module Sums where
 
 import Control.Exception
@@ -16,7 +35,7 @@ import Control.Monad.Reader
 
 import Control.Monad.Fork
 
-newtype ExampleT m a = ExampleT { runExampleT :: WriterT (Sum Int) (ExceptT String (ReaderT ([Int], Int) m)) a }
+newtype ExampleT m a = ExampleT { runExampleInnerT :: WriterT (Sum Int) (ExceptT String (ReaderT ([Int], Int) m)) a }
   deriving ( Functor
            , Applicative
            , Monad
@@ -25,15 +44,15 @@ newtype ExampleT m a = ExampleT { runExampleT :: WriterT (Sum Int) (ExceptT Stri
            , MonadWriter (Sum Int)
            , MonadReader ([Int], Int)
            )
+type ExampleTWriterHandler m = Sum Int -> ExceptT String (ReaderT ([Int], Int) m) ()
+type ExampleTExceptHandler m = String -> ReaderT ([Int], Int) m ()
 
-instance MonadFork h m => MonadFork ((Sum Int -> m ()) :<: (String -> m ()) :<: h) (ExampleT m) where
-    forkT (writerHandler :<: exceptHandler :<: subHandler) (ExampleT action) 
-        = ExampleT $ forkT (writerHandler' :<: exceptHandler' :<: subHandler) action
-      where
-        writerHandler' :: Sum Int -> ExceptT String (ReaderT ([Int], Int) _) ()
-        writerHandler' x = lift $ lift $ writerHandler x
-        exceptHandler' :: String -> ReaderT ([Int], Int) _ ()
-        exceptHandler' x = lift $ exceptHandler x
+runExampleT :: ExampleT m a -> [Int] -> Int -> m (Either String (a, Sum Int))
+runExampleT f input inputLength = runReaderT (runExceptT (runWriterT (runExampleInnerT f))) (input, inputLength)
+
+deriving instance MonadFork h m => MonadFork 
+    (ExampleTWriterHandler m :<: ExampleTExceptHandler m :<: h)
+    (ExampleT m)
 
 data WorkerResult a
     = WorkerFailed String
@@ -50,8 +69,10 @@ runWorker start count = do
 makeWorker :: Int -> Int -> ExampleT IO (ThreadId, MVar (WorkerResult (Sum Int)))
 makeWorker start count = do
     workerVar <- liftIO $ newEmptyMVar
-    let handleExcept msg = putMVar workerVar $ WorkerFailed msg
-        handleWriter result = putMVar workerVar $ WorkerDone result
+    let handleExcept :: ExampleTExceptHandler IO
+        handleExcept msg = liftIO $ putMVar workerVar $ WorkerFailed msg
+        handleWriter :: ExampleTWriterHandler IO
+        handleWriter result = liftIO $ putMVar workerVar $ WorkerDone result
     threadId <- forkT (handleWriter :<: handleExcept :<: ()) $ runWorker start count
     return (threadId, workerVar)
 
@@ -68,19 +89,18 @@ combineWorkerResults vars = forM_ vars $ \var -> do
         WorkerFailed msg -> throwError msg
         WorkerDone result -> tell result
 
+doMain :: Int -> ExampleT IO ()
+doMain numWorkers = do
+    workers <- makeWorkers numWorkers
+    let workerVars = map snd workers
+    combineWorkerResults workerVars
+
 main :: IO ()
 main = do
     let input = [0..5000]
         inputLength = 5001
         numWorkers = 10
-    result <- flip runReaderT (input, inputLength) 
-                 $ runExceptT 
-                 $ runWriterT 
-                 $ runExampleT
-                 $ do
-                    workers <- makeWorkers numWorkers
-                    let workerVars = map snd workers
-                    combineWorkerResults workerVars
+    result <- runExampleT (doMain numWorkers) input inputLength
     case result of
         Right ((), Sum x) -> putStrLn $ "Sum is " ++ show x
         Left msg -> putStrLn $ "Failed with error: " ++ show msg
