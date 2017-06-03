@@ -1,26 +1,26 @@
---------------------------------------------------------------------------------
--- |
--- Module : Control.Monad.Fork
--- Copyright : (c) Andrew Melnick 2016
--- License : BSD3
--- 
--- Maintaner : Andrew Melnick
--- Stability : experimental
--- Portability : portable
---
--- Lifting the concept of forking a new thread into common monad transformers
---
--- Monads in the MonadFork class are able to run actions in a new thread, but
--- require some sort of "handler" data in order to do so properly, for example,
--- the `ExceptT` Transformer requires some action to be run in the event that
--- the new thread has an exception
---
--- The `:<:` operator joins handlers into a chain, so the monad
--- @(AT (BT (CT IO)))@ will have a handler that looks like
--- @(A :<: B :<: C :<: ())@, (where `()` is the handler for `IO`), indicating that
--- the handlers will be applied in the same order as the effects if one were
--- unwrapping the stack using @runCT (runBT (runAT x)))@
---------------------------------------------------------------------------------
+{-|
+Module      : Control.Monad.Fork
+Description : Multithreading within monad transformer stacks
+Copyright   : (c) Andrew Melnick 2016
+License     : BSD3
+Maintainer  : Andrew Melnick
+Stability   : experimental
+Portability : portable
+
+Lifting the concept of forking a new thread into common monad transformers
+
+Monads in the MonadFork class are able to run actions in a new thread, but
+require some sort of "handler" data in order to do so properly, for example,
+the `ExceptT` Transformer requires some action to be run in the event that
+the new thread has an exception
+
+The `:<:` operator joins handlers into a chain, so the monad
+@(AT (BT (CT IO)))@ will have a handler that looks like
+@(A :<: B :<: C :<: ())@, (where `()` is the handler for `IO`), indicating that
+the handlers will be applied in the same order as the effects if one were
+unwrapping the stack using @runCT (runBT (runAT x)))@
+-}
+
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
