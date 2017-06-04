@@ -11,7 +11,7 @@ Effects of the first kind are trivial, the environment is retreived within the m
 
 Effects of the second and third kind are less trivial, they are solved by passing a "handler" to the fork function. Effects of the second kind are handled by functions which take the non-standard exit, and the third kind are handled by functions which take the additional data.
 
-Stacks of tranformers are then handled by sums of their handlers (accomplished with the :<: operator), with the base always being IO, which requires no handler, but requires a value of type () for consitency.
+Stacks of tranformers are then handled by products of their handlers (accomplished with the :<: operator), with the base always being IO, which requires no handler, but requires a value of type () for consitency.
 
 A handler might send a message to the main thread using the structures in Control.Concurrent, or the STM library, write to a file handle, or perhaps ignore the result altogether.
 
